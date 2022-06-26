@@ -1,7 +1,9 @@
 package com.eriklabs.stockmarketcleanarchwithcomposeapp.data.repository
 
+import com.eriklabs.stockmarketcleanarchwithcomposeapp.data.csv.CSVParser
 import com.eriklabs.stockmarketcleanarchwithcomposeapp.data.local.database.StockDatabase
 import com.eriklabs.stockmarketcleanarchwithcomposeapp.data.mappers.toCompanyListing
+import com.eriklabs.stockmarketcleanarchwithcomposeapp.data.mappers.toCompanyListingEntity
 import com.eriklabs.stockmarketcleanarchwithcomposeapp.data.remote.StockApi
 import com.eriklabs.stockmarketcleanarchwithcomposeapp.domain.model.CompanyListing
 import com.eriklabs.stockmarketcleanarchwithcomposeapp.domain.repository.StockRepository
@@ -15,8 +17,9 @@ import javax.inject.Singleton
 
 @Singleton
 class StockRepositoryImpl @Inject constructor(
-    val api: StockApi,
-    val db: StockDatabase
+    private val api: StockApi,
+    private val db: StockDatabase,
+    private val companyListingParser: CSVParser<CompanyListing>
 ) : StockRepository {
 
     private val stockDao = db.stockDao
@@ -39,15 +42,35 @@ class StockRepositoryImpl @Inject constructor(
             } else {
                 val remoteListing = try {
                     val response = api.getListings()
-                    response.byteStream()
+                    companyListingParser.parse(response.byteStream())
                 } catch (e: IOException){
                     emit(Resource.Error(
                         message = "Couldn't load data"
                     ))
+                    null
                 } catch (e: HttpException){
                     emit(Resource.Error(
                         message = "Couldn't load data"
                     ))
+                    null
+                }
+                remoteListing?.let { listings ->
+                    with(stockDao){
+                        clearCompanyListings()
+                        insertCompanyListings(
+                            listings.map {
+                                it.toCompanyListingEntity()
+                            }
+                        )
+                    }
+                    emit(Resource.Success(
+                        data = stockDao.searchCompanyListing(
+                            query = ""
+                        ).map {
+                            it.toCompanyListing()
+                        }
+                    ))
+                    emit(Resource.Loading(false))
                 }
             }
         }
